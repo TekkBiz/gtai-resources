@@ -3,18 +3,19 @@ name: Build micro1 RSS feed
 on:
   push:
     branches: [main]
+    paths:
+      - '.github/workflows/rss.yml'
+      - 'rss_generator.py'
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: rss-feed
+  cancel-in-progress: false
 
 jobs:
   build-feed:
@@ -24,22 +25,17 @@ jobs:
       OUTPUT: feed.xml
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
       - name: Generate feed
         run: python rss_generator.py
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
 
-  deploy:
-    needs: build-feed
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Commit and push feed
+        run: |
+          git switch main || git switch -c main
+          git add feed.xml
+          git -c user.name='rss-bot' -c user.email='actions@github.com' commit -m 'chore: refresh jobs feed [skip ci]' || echo 'No changes to commit'
+          git push origin main
