@@ -13,6 +13,7 @@ import html
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -37,15 +38,29 @@ class JobError(RuntimeError):
     pass
 
 
-def fetch_json(url: str) -> dict:
+def fetch_json(url: str, attempts: int = 3) -> dict:
     req = urllib.request.Request(url, headers=LANG_HEADERS)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            return json.load(res)
-    except urllib.error.HTTPError as e:
-        raise JobError(f"HTTP {e.code} for {url}: {e.read()[:300]!r}") from e
-    except urllib.error.URLError as e:
-        raise JobError(f"Network error for {url}: {e.reason}") from e
+    backoff = 2
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as res:
+                return json.load(res)
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < attempts:
+                print(f"  HTTP {e.code} on attempt {attempt}; retrying in {backoff}s", flush=True)
+                time.sleep(backoff)
+                backoff += 3
+                continue
+            raise JobError(f"HTTP {e.code} for {url}: {e.read()[:300]!r}") from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            reason = getattr(e, "reason", None) or e
+            if attempt < attempts:
+                print(f"  Network error on attempt {attempt}; retrying in {backoff}s", flush=True)
+                time.sleep(backoff)
+                backoff += 3
+                continue
+            raise JobError(f"Network error for {url}: {reason}") from e
+    raise JobError(f"Exhausted retries for {url}")
 
 
 def fetch_all_jobs(referral_code: str) -> list[dict]:
